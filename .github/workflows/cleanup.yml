@@ -1,0 +1,30 @@
+# Deletes reel videos once they have been published. Each release notes when it
+# may go: a line "delete-after: <ISO 8601 time>" (publish time + a safety margin).
+# Runs hourly on GitHub's servers, so nothing has to be switched on locally.
+name: Delete published videos
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete releases past their delete-after time
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          now=$(date -u +%s)
+          for tag in $(gh release list -R "$REPO" --limit 200 --json tagName --jq '.[].tagName'); do
+            when=$(gh release view "$tag" -R "$REPO" --json body --jq '.body' | grep -oP 'delete-after:\s*\K\S+' || true)
+            if [ -z "$when" ]; then echo "$tag: no delete-after line, kept"; continue; fi
+            if [ "$now" -ge "$(date -u -d "$when" +%s)" ]; then
+              echo "$tag: deleting (delete-after $when)"
+              gh release delete "$tag" -R "$REPO" --cleanup-tag -y
+            else
+              echo "$tag: kept until $when"
+            fi
+          done
