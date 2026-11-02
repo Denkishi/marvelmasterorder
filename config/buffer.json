@@ -5,9 +5,13 @@
     "tiktok": "6ae8949de29c69a17138596c",
     "instagram": "6ae89482e29c69a17138588a"
   },
-  "timezone": "Europe/Rome",
-  "postAt": "18:00",
+  "timezone": "America/New_York",
+  "postAt": [
+    "12:00",
+    "19:00"
+  ],
   "ahead": 3,
   "keepDays": 2,
-  "youtubeCategory": "24"
+  "youtubeCategory": "24",
+  "leadHours": 3
 }

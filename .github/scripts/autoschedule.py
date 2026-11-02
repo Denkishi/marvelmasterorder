@@ -55,14 +55,20 @@ def scheduled_slots():
 
 
 def next_slot(slots):
-    """The day after the last scheduled reel (never earlier than tomorrow), at the posting hour."""
-    now = dt.datetime.now(TZ)
-    day = now.date() + dt.timedelta(days=1)
+    """First daily posting time (config "postAt", one or more "HH:MM") after the last scheduled
+    reel and at least LEAD_HOURS from now, so every slot is filled in order."""
+    earliest = dt.datetime.now(TZ) + dt.timedelta(hours=CFG.get("leadHours", 3))
     if slots:
-        last = dt.datetime.fromisoformat(slots[-1].replace("Z", "+00:00")).astimezone(TZ).date()
-        day = max(day, last + dt.timedelta(days=1))
-    h, m = map(int, CFG["postAt"].split(":"))
-    return dt.datetime(day.year, day.month, day.day, h, m, tzinfo=TZ)
+        earliest = max(earliest, dt.datetime.fromisoformat(slots[-1].replace("Z", "+00:00")).astimezone(TZ)
+                       + dt.timedelta(minutes=1))
+    times = sorted(tuple(map(int, t.split(":"))) for t in CFG["postAt"])
+    day = earliest.date()
+    while True:
+        for h, m in times:
+            slot = dt.datetime(day.year, day.month, day.day, h, m, tzinfo=TZ)
+            if slot >= earliest:
+                return slot
+        day += dt.timedelta(days=1)
 
 
 def queued():
