@@ -1,6 +1,7 @@
 # Schedules queued videos on Buffer: whenever fewer than "ahead" reels (config/buffer.json) are
-# waiting, the next pre-release in reading order is posted to every channel at the next daily slot.
-# Needs the repository secret BUFFER_API_KEY. Runs hourly on GitHub's servers.
+# waiting, the next reel in reading order moves from the private queue repo to a public release
+# here and is posted to every channel at the next slot. Needs the secrets BUFFER_API_KEY and
+# QUEUE_TOKEN (fine-grained token, Contents read/write on the queue repo). Runs hourly.
 name: Schedule queued videos on Buffer
 on:
   schedule:
@@ -18,6 +19,8 @@ jobs:
       - name: Top up Buffer from the queue
         env:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          QUEUE_TOKEN: ${{ secrets.QUEUE_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          QUEUE_REPO: Denkishi/marvelmasterorder-queue
         run: python3 .github/scripts/autoschedule.py

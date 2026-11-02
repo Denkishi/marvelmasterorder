@@ -1,14 +1,18 @@
-"""Keep Buffer topped up from the queue of ready videos.
+"""Keep Buffer topped up from the private queue of ready videos.
 
-Queue = GitHub pre-releases that carry the video and a post.json: reading order number, optional
-fixed "dueAt" (ISO 8601), and per channel the caption "text", YouTube "title", and "metadata" with
-any Buffer field for that network (e.g. categoryId, privacy, firstComment). Each run counts the reels already scheduled on Buffer; while fewer than AHEAD are
-waiting, it takes the lowest-order queued release, schedules it on every channel at the next free
-daily slot, and turns the release into a normal one with a "delete-after:" line so cleanup.yml
-removes the video once it has gone out. A channel already done is noted in the release body
+Queue = releases in the private repo QUEUE_REPO, one per reel, tagged o<order, 5 digits>-<video
+name> so they sort in reading order, each carrying the video and a post.json: optional fixed
+"dueAt" (ISO 8601), and per channel the caption "text", YouTube "title", and "metadata" with any
+Buffer field for that network (e.g. categoryId, privacy, firstComment).
+
+Each run counts the reels already scheduled on Buffer; while fewer than AHEAD are waiting, it moves
+the next queued reel into a release of this public repo (Buffer only takes public URLs), schedules
+it on every channel at the next free slot, adds a "delete-after:" line so cleanup.yml removes the
+video once it has gone out, and deletes the reel from the queue. So only the next few reels are
+ever public. A channel already done is noted in the public release body
 ("scheduled-<service>: <post id>"), so a run that fails half-way never double-posts.
 
-Env: BUFFER_API_KEY (secret), GH_TOKEN, REPO. Settings: config/buffer.json.
+Env: BUFFER_API_KEY, QUEUE_TOKEN (secrets), GH_TOKEN, REPO, QUEUE_REPO. Settings: config/buffer.json.
 """
 import datetime as dt
 import json
@@ -22,8 +26,11 @@ from zoneinfo import ZoneInfo
 
 CFG = json.loads((Path(__file__).resolve().parents[2] / "config/buffer.json").read_text(encoding="utf-8"))
 REPO = os.environ["REPO"]
+QUEUE_REPO = os.environ["QUEUE_REPO"]
 KEY = os.environ.get("BUFFER_API_KEY", "")
+QUEUE_TOKEN = os.environ.get("QUEUE_TOKEN", "")
 TZ = ZoneInfo(CFG["timezone"])
+WORK = Path("/tmp/reels")
 
 
 def gql(query, variables=None):
@@ -39,8 +46,11 @@ def gql(query, variables=None):
     return out["data"]
 
 
-def gh(*args):
-    return subprocess.run(["gh", *args, "-R", REPO], check=True, capture_output=True, text=True).stdout
+def gh(*args, queue=False):
+    """gh against the public repo (workflow token) or the private queue (QUEUE_TOKEN)."""
+    env = dict(os.environ, GH_TOKEN=QUEUE_TOKEN) if queue else None
+    return subprocess.run(["gh", *args, "-R", QUEUE_REPO if queue else REPO], check=True,
+                          capture_output=True, text=True, env=env).stdout
 
 
 def scheduled_slots():
@@ -72,16 +82,26 @@ def next_slot(slots):
 
 
 def queued():
-    rels = json.loads(gh("release", "list", "--limit", "200", "--json", "tagName,isPrerelease"))
-    items = []
-    for r in rels:
-        if not r["isPrerelease"]:
-            continue
-        tag = r["tagName"]
-        gh("release", "download", tag, "-p", "post.json", "-O", f"/tmp/{tag}.json", "--clobber")
-        post = json.loads(Path(f"/tmp/{tag}.json").read_text(encoding="utf-8"))
-        items.append((post["order"], tag, post))
-    return sorted(items)
+    """Queue tags in reading order (the tag starts with the zero-padded order number)."""
+    tags = json.loads(gh("release", "list", "--limit", "1000", "--json", "tagName", queue=True))
+    return sorted(t["tagName"] for t in tags if re.match(r"o\d{5}-", t["tagName"]))
+
+
+def public_tags():
+    return {t["tagName"] for t in json.loads(gh("release", "list", "--limit", "200", "--json", "tagName"))}
+
+
+def make_public(qtag):
+    """Copy a queued reel into a public pre-release (skipped if an earlier run already did)."""
+    tag = qtag.split("-", 1)[1]
+    folder = WORK / tag
+    folder.mkdir(parents=True, exist_ok=True)
+    gh("release", "download", qtag, "-D", str(folder), "--clobber", queue=True)
+    post = json.loads((folder / "post.json").read_text(encoding="utf-8"))
+    if tag not in public_tags():
+        gh("release", "create", tag, "--prerelease", "--title", post["youtube"]["title"],
+           "--notes", f"from queue ({qtag})", str(folder / post["video"]), str(folder / "post.json"))
+    return tag, post
 
 
 def create(service, channel, post, video, due):
@@ -110,17 +130,18 @@ def create(service, channel, post, video, due):
 
 
 def main():
-    if not KEY:
-        sys.exit("BUFFER_API_KEY secret is not set")
+    if not KEY or not QUEUE_TOKEN:
+        sys.exit("BUFFER_API_KEY and QUEUE_TOKEN secrets must both be set")
     slots = scheduled_slots()
     print(f"reels waiting on Buffer: {len(slots)} (keep {CFG['ahead']})")
     queue = queued()
     print(f"videos ready in the queue: {len(queue)}")
     while len(slots) < CFG["ahead"] and queue:
-        _, tag, post = queue.pop(0)
+        qtag = queue.pop(0)
+        tag, post = make_public(qtag)
         body = json.loads(gh("release", "view", tag, "--json", "body"))["body"]
         m = re.search(r"buffer-due:\s*(\S+)", body)
-        # a time fixed in post.json wins; otherwise the next free daily slot
+        # a time fixed in post.json wins; otherwise the next free slot
         fixed = post.get("dueAt")
         due = dt.datetime.fromisoformat(m.group(1)) if m else (
             dt.datetime.fromisoformat(fixed).astimezone(TZ) if fixed else next_slot(slots))
@@ -137,6 +158,8 @@ def main():
         gone = (due + dt.timedelta(days=CFG["keepDays"])).astimezone(dt.timezone.utc)
         body += f"\ndelete-after: {gone.strftime('%Y-%m-%dT%H:%M:%SZ')}"
         gh("release", "edit", tag, "--notes", body, "--prerelease=false")
+        gh("release", "delete", qtag, "--cleanup-tag", "-y", queue=True)
+        print(f"{tag}: removed from the private queue")
         slots.append(due.astimezone(dt.timezone.utc).isoformat())
         slots.sort()
     if not queue:
