@@ -1,0 +1,23 @@
+# Schedules queued videos on Buffer: whenever fewer than "ahead" reels (config/buffer.json) are
+# waiting, the next pre-release in reading order is posted to every channel at the next daily slot.
+# Needs the repository secret BUFFER_API_KEY. Runs hourly on GitHub's servers.
+name: Schedule queued videos on Buffer
+on:
+  schedule:
+    - cron: "37 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: autoschedule
+jobs:
+  schedule:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Top up Buffer from the queue
+        env:
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 .github/scripts/autoschedule.py

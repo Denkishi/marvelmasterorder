@@ -1,0 +1,13 @@
+{
+  "organizationId": "6ae8827173d291725ebb1e16",
+  "channels": {
+    "youtube": "6ae88dd8e29c69a171382618",
+    "tiktok": "6ae8949de29c69a17138596c",
+    "instagram": "6ae89482e29c69a17138588a"
+  },
+  "timezone": "Europe/Rome",
+  "postAt": "18:00",
+  "ahead": 3,
+  "keepDays": 2,
+  "youtubeCategory": "24"
+}
