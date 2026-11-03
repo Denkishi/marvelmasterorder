@@ -108,10 +108,10 @@ def create(service, channel, post, video, due):
     # defaults per network, overridden by any Buffer metadata field the post.json sets for it
     p = post[service]
     base = {
-        "youtube": {"categoryId": CFG.get("youtubeCategory", "24"), "isAiGenerated": True,
+        "youtube": {"categoryId": CFG.get("youtubeCategory", "24"), "isAiGenerated": False,
                     "madeForKids": False, "privacy": "public"},
-        "tiktok": {"isAiGenerated": True},
-        "instagram": {"type": "reel", "shouldShareToFeed": True, "isAiGenerated": True},
+        "tiktok": {"isAiGenerated": False},
+        "instagram": {"type": "reel", "shouldShareToFeed": True, "isAiGenerated": False},
     }[service]
     if service == "youtube":
         base["title"] = p["title"]
